@@ -1,0 +1,30 @@
+{
+  "name": "express-postman-router",
+  "version": "1.0.0",
+  "description": "Create postman collections from source code and secure & sanitize inputs.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adrian-kriegel/express-postman-router.git"
+  },
+  "keywords": [
+    "express",
+    "postman",
+    "api",
+    "router"
+  ],
+  "author": "Adrian Kriegel",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/adrian-kriegel/express-postman-router/issues"
+  },
+  "homepage": "https://github.com/adrian-kriegel/express-postman-router#readme",
+  "dependencies": {
+    "express": "^4.17.1",
+    "jsonschema": "^1.2.4",
+    "request": "^2.88.0"
+  }
+}
