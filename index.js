@@ -129,7 +129,7 @@ function checkParameters(req, desc, validator)
 	})
 }
 
-class ApiRouter
+class PostmanRouter
 {
 	constructor(args)
 	{
@@ -344,3 +344,4 @@ class ApiRouter
 	}
 
 }
+module.exports.PostmanRouter = PostmanRouter
