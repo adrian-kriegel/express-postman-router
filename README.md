@@ -13,7 +13,7 @@ Automatically create postman collections from source code.
       host: "ifmacinema.com",
 	  postman: 
 	  {
-	  	collection: "<collection_uid>",
+	  	collection_uid: "<collection_uid>",
 		apikey: "<your postman api key>"
 	  }
     })
