@@ -4,6 +4,10 @@ This is an early bodgy version of what I had in mind. Use with care.
 ## express-postman-router
 Create automatically documented & secured API calls.
 
+```
+npm install adrian-kriegel/express-postman-router
+```
+
 This module wraps around express and the Postman API. The API documentation can be written in code and linked up to a Postman collection. This means that your API docs will be 100% accurate. 
 By using JSON schemata, you can define which parameters are required and how they are supposed to be structured before any of your callbacks are executed.
 
