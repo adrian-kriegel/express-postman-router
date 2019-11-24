@@ -2,11 +2,13 @@
 
 const express 	= require("express")
 
-const Validator = require("jsonschema").Validator
+const Validator = require('jsonschema').Validator
 
-const path 		= require("path")
+const path 		= require('path')
 
-const request 	= require("request")
+const request 	= require('request')
+
+var optionPresets = {}
 
 if (!Array.prototype.last){
     Array.prototype.last = function(){
@@ -14,7 +16,7 @@ if (!Array.prototype.last){
     };
 };
 
-module.exports.errcodes = 
+const errcodes = 
 {
 	UNKNOWN: -2,
 	SUCCESS: 200,
@@ -24,6 +26,7 @@ module.exports.errcodes =
 	FORBIDDEN: 403,
 	INTERNAL_ERROR: 500,
 }
+module.exports.errcodes = errcodes
 
 /**
 	Returns an error-object
@@ -31,9 +34,12 @@ module.exports.errcodes =
 function error(err = {})
 {
 	err.code 	= err.code 	|| errcodes.UNKNOWN
-	err.msg 	= err.msg 	|| "no error description available"
+	err.msg 	= err.msg 	|| 'no error description available'
 	err.data 	= err.data 	|| {}
+
+	return err
 }
+module.exports.error = error
 
 /**
 	Returns a API-Result object
@@ -54,32 +60,36 @@ function result(res, err)
 		}
 	}
 }
+module.exports.result = result
 
 function checkParameters(req, desc, validator)
 {
-	return new Promise(function(resolve, reject)
+	return new Promise((resolve, reject) =>
 	{
 		if(desc.params)
 		{
 			for(var name in desc.params)
 			{
+				console.log(name)
 				const param = desc.params[name]
 				const bodyparam = req.body[name]
 
 				//check if the parameter is required and missing
 				if(param.required && !bodyparam)
 				{
-					reject(result(null, 
+					const e = result(null, 
 					{
 						code: errcodes.BAD_REQUEST,
-						msg: "Missing parameter: " + name 
-					}))
+						msg: 'Missing parameter: ' + name 
+					})
+
+					reject(e)
 
 					return
 				}
 
 				//parse the JSON if necessary
-				if(param.type != "string")
+				if(param.type != 'string')
 				{
 					try
 					{
@@ -90,7 +100,7 @@ function checkParameters(req, desc, validator)
 						reject(result(null, 
 						{
 							code: errcodes.BAD_REQUEST,
-							msg: "Schema error: " + name,
+							msg: 'Schema error: ' + name,
 							data: 
 							{
 								validationError: vales.error
@@ -106,10 +116,11 @@ function checkParameters(req, desc, validator)
 
 				if(valres.errors.length != 0)
 				{
+					console.error(e)
 					reject(result(null, 
 					{
 						code: errcodes.BAD_REQUEST,
-						msg: "Schema error: " + name,
+						msg: 'Schema error: ' + name,
 						data: 
 						{
 							validationError: vales.errors,
@@ -121,37 +132,57 @@ function checkParameters(req, desc, validator)
 				req.body[param] = bodyparam
 			}
 
+			resolve()
+
 		}else
 		{
+			console.log("no params")
 			//no parameters are required
 			resolve()
 		}
 	})
 }
 
+//used to create default options
+module.exports.options = function(name, args)
+{
+	optionPresets[name] = args
+}
+
 class PostmanRouter
 {
 	constructor(args)
 	{
+		//use preset options
+		if(args.use && optionPresets[args.use])
+		{
+			for(var key in optionPresets[args.use])
+			{
+				args[key] = key in args ? args[key] : optionPresets[args.use][key]
+			}
+		}
+
 		this.folder = args.folder
 
 		this.mountpath = args.mountpath || '/'
 
-		this.host = args.host || process.env.API_URL
+		this.host = args.host || process.env.HOSTNAME || ''
 
 		this.validator = new Validator()
 
-		this.router = express.Router()
+		this.router = args.router || express.Router()
 
 		this.routes = {}
 
 		this.postman = args.postman
 
+		this.protocol = args.protocol || 'http'
+
 		if(args.schemas)
 		{
 			var schemas = args.schemas
 
-			if(typeof(schemas) == "object")
+			if(typeof(schemas) == 'object')
 			{
 				schemas = [args.schemas]
 			}
@@ -178,28 +209,42 @@ class PostmanRouter
 	*/
 	add(desc)
 	{
-		if(typeof(desc) == "string")
+		if(typeof(desc) == 'string')
 		{
 			desc = { route: desc }
 		}
 
-		if(typeof(desc.route) != "string")
+		if(typeof(desc.route) != 'string')
 		{
-			throw "invalid route"
+			throw 'invalid route'
 		}
 
-		desc.method = desc.method || "GET"
+		desc.method = desc.method || 'GET'
 
-		desc.name = desc.name || desc.route.split("/").last()
+		desc.name = desc.name || desc.route.split('/').last()
 
 		this.routes[desc.name] = desc
 
 		//before executing the callbacks, make sure the specification is used correctly by the caller
-		this.router.post(desc.route, () =>
+		this.router.all(desc.route, (req, res, next) =>
 		{
-			checkParameters(desc)
+			if(req.method != desc.method)
+			{
+				next()
+				return	
+			} 
+
+			checkParameters(req, desc, this.validator).then((e) =>
+			{
+
+				desc.callback(req, res, next)
+
+			}).catch((e) =>
+			{
+				console.error(e)
+				res.send(e)
+			})
 		})
-		this.router.post(desc.route, desc.callback)
 	}
 
 	updatePostmanCollection(c)
@@ -236,14 +281,14 @@ class PostmanRouter
 					{
 						const param = route.params[key]
 
-						param.description = param.description || ""
+						param.description = param.description || ''
 
 						formdata.push(
 						{
 							key: key,
 							type: 'text',
 
-							description: `(${param.type}, ${param.required ? "required" : "optional"}) ${param.description}`
+							description: `(${param.type}, ${param.required ? 'required' : 'optional'}) ${param.description}`
 						})
 
 						/*
@@ -264,7 +309,7 @@ class PostmanRouter
 					},
 					request:
 					{
-						url: 'https://' + path.join(this.host, this.mountpath, route.route),
+						url: this.protocol + '://' + path.join(this.host, this.mountpath, route.route),
 						description: desc,
 						method: route.method,
 						body:
@@ -291,55 +336,59 @@ class PostmanRouter
 
 	updatePostman()
 	{
-		const apiKey = this.postman.apikey
-
-		const collection_uid = this.postman.collection_uid
-
-		const url = "https://api.getpostman.com/collections/" + collection_uid
-
-		//get the collection
-		request(
+		return new Promise((resolve, reject) =>
 		{
-			url: url,
-			headers:
-			{
-				"X-Api-Key": apiKey
-			},
-			method: "GET"
-		}, (err, res, body) =>
-		{
-			if(!err)
-			{
-				const collection = JSON.parse(body)
+			const apiKey = this.postman.apikey
 
-				this.updatePostmanCollection(collection)
+			const collection_uid = this.postman.collection_uid
 
-				//update the collection
-				request(
+			const url = 'https://api.getpostman.com/collections/' + collection_uid
+
+			//get the collection
+			request(
+			{
+				url: url,
+				headers:
 				{
-					url: url,
-					headers:
-					{
-						"X-Api-Key": apiKey
-					},
-					method: "PUT",
-					body: JSON.stringify(collection)
-
-				}, (err, res, body) =>
-				{
-					if(!err)
-					{
-						console.log(JSON.parse(body))
-
-					}else
-					{
-						console.log(err)
-					}
-				})	
-			}else
+					'X-Api-Key': apiKey
+				},
+				method: 'GET'
+			}, (err, res, body) =>
 			{
-				console.error(err)
-			}
+				if(!err)
+				{
+					const collection = JSON.parse(body)
+
+					//update the collection locally
+					this.updatePostmanCollection(collection)
+
+					//update the collection via the postman api
+					request(
+					{
+						url: url,
+						headers:
+						{
+							'X-Api-Key': apiKey
+						},
+						method: 'PUT',
+						body: JSON.stringify(collection)
+
+					}, (err, res, body) =>
+					{
+						if(!err)
+						{
+							resolve(JSON.parse(body))
+
+						}else
+						{
+							reject(err)
+						}
+					})	
+				}else
+				{
+					reject(err)
+				}
+			})
 		})
 	}
 
