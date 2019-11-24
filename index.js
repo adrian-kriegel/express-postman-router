@@ -70,7 +70,6 @@ function checkParameters(req, desc, validator)
 		{
 			for(var name in desc.params)
 			{
-				console.log(name)
 				const param = desc.params[name]
 				const bodyparam = req.body[name]
 
@@ -116,7 +115,6 @@ function checkParameters(req, desc, validator)
 
 				if(valres.errors.length != 0)
 				{
-					console.error(e)
 					reject(result(null, 
 					{
 						code: errcodes.BAD_REQUEST,
@@ -136,7 +134,6 @@ function checkParameters(req, desc, validator)
 
 		}else
 		{
-			console.log("no params")
 			//no parameters are required
 			resolve()
 		}
@@ -241,7 +238,6 @@ class PostmanRouter
 
 			}).catch((e) =>
 			{
-				console.error(e)
 				res.send(e)
 			})
 		})
