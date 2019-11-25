@@ -10,12 +10,6 @@ const request 	= require('request')
 
 var optionPresets = {}
 
-if (!Array.prototype.last){
-    Array.prototype.last = function(){
-        return this[this.length - 1];
-    };
-};
-
 const errcodes = 
 {
 	UNKNOWN: -2,
@@ -71,20 +65,26 @@ function checkParameters(req, desc, validator)
 			for(var name in desc.params)
 			{
 				const param = desc.params[name]
-				const bodyparam = req.body[name]
+				var bodyparam = req.body[name]
 
-				//check if the parameter is required and missing
-				if(param.required && !bodyparam)
+				if(!bodyparam)
 				{
-					const e = result(null, 
+					if(param.required)
 					{
-						code: errcodes.BAD_REQUEST,
-						msg: 'Missing parameter: ' + name 
-					})
+						const e = result(null, 
+						{
+							code: errcodes.BAD_REQUEST,
+							msg: 'Missing parameter: ' + name 
+						})
 
-					reject(e)
+						reject(e)
 
-					return
+						return
+
+					}else
+					{
+						continue
+					}
 				}
 
 				//parse the JSON if necessary
@@ -99,10 +99,10 @@ function checkParameters(req, desc, validator)
 						reject(result(null, 
 						{
 							code: errcodes.BAD_REQUEST,
-							msg: 'Schema error: ' + name,
+							msg: 'Invalid JSON: ' + name,
 							data: 
 							{
-								validationError: vales.error
+								param: name
 							} 
 						}))
 
@@ -175,6 +175,8 @@ class PostmanRouter
 
 		this.protocol = args.protocol || 'http'
 
+		this.enctype = args.enctype || 'application/x-www-form-urlencoded'
+
 		if(args.schemas)
 		{
 			var schemas = args.schemas
@@ -218,7 +220,9 @@ class PostmanRouter
 
 		desc.method = desc.method || 'GET'
 
-		desc.name = desc.name || desc.route.split('/').last()
+		var namesplit = desc.route.split('/')
+
+		desc.name = desc.name || namesplit[namesplit.length() - 1]
 
 		this.routes[desc.name] = desc
 
@@ -233,7 +237,6 @@ class PostmanRouter
 
 			checkParameters(req, desc, this.validator).then((e) =>
 			{
-
 				desc.callback(req, res, next)
 
 			}).catch((e) =>
@@ -271,7 +274,20 @@ class PostmanRouter
 				if(route.params)
 				{
 					//desc += "\n### Parameters"
+					var oldFormdata = null
 
+					if(oldRouteIndex && collection.item[oldRouteIndex].request)
+					{
+						if(this.enctype == 'formdata')
+						{
+							oldFormdata = collection.item[oldRouteIndex].request.body.formdata
+						}
+
+						if(this.enctype == 'application/x-www-form-urlencoded')
+						{
+							oldFormdata = collection.item[oldRouteIndex].request.body.urlencoded
+						}
+					}
 
 					for(var key in route.params)
 					{
@@ -279,11 +295,28 @@ class PostmanRouter
 
 						param.description = param.description || ''
 
+						//inital field value
+						var oldField = null
+
+						//search for the original value if there is one
+						if(oldRouteIndex)
+						{
+							for(var f in oldFormdata)
+							{
+								if(oldFormdata[f].key == key)
+								{
+									oldField = oldFormdata[f]
+								}
+							}
+						}
+
+						const exampleVal = typeof(param.example) != 'undefined' ? ( param.type == 'string'? param.example : JSON.stringify(param.example)) : null 
+
 						formdata.push(
 						{
 							key: key,
 							type: 'text',
-
+							value: exampleVal ? exampleVal : ( oldField ? oldField.value : '' ),
 							description: `(${param.type}, ${param.required ? 'required' : 'optional'}) ${param.description}`
 						})
 
@@ -316,10 +349,35 @@ class PostmanRouter
 					}
 				}
 
+				if(this.enctype != 'formdata')
+				{
+					newRoute.request.header = 
+					[
+						{
+							key: 'Content-Type',
+							name: 'Content-Type',
+							value: this.enctype,
+							type: 'text' 
+						}
+					]
+
+					if(this.enctype == 'application/x-www-form-urlencoded')
+					{
+						newRoute.request.body.mode = 'urlencoded'
+						newRoute.request.body.urlencoded = newRoute.request.body.formdata
+						delete newRoute.request.body.formdata
+					}
+				}
+
 				if(oldRouteIndex)
 				{
+					//keep some of the data from the current collection
+					//that way we don't change the order or any values, folders etc.
 					newRoute._postman_id = collection.item[oldRouteIndex]._postman_id
 
+					newRoute.response = collection.item[oldRouteIndex].response
+
+					//replace the route
 					collection.item[oldRouteIndex] = newRoute
 
 				}else
