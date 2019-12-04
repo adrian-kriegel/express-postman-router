@@ -8,6 +8,10 @@ const path 		= require('path')
 
 const request 	= require('request')
 
+
+//list of instances in order to perform operations on all of them at once
+const instances = []
+
 var optionPresets = {}
 
 const errcodes = 
@@ -56,6 +60,17 @@ function result(res, err)
 }
 module.exports.result = result
 
+/**
+	Returns an empty result with just an error message
+*/
+function errRes(code, msg='', data={})
+{
+	return {
+		error: error({code: code, msg: msg, data: data}),
+		result: null
+	}	
+}
+
 function checkParameters(req, desc, validator)
 {
 	return new Promise((resolve, reject) =>
@@ -88,7 +103,7 @@ function checkParameters(req, desc, validator)
 				}
 
 				//parse the JSON if necessary
-				if(param.type != 'string')
+				if(param.schema.type != 'string')
 				{
 					try
 					{
@@ -111,23 +126,25 @@ function checkParameters(req, desc, validator)
 				}
 
 				//check if the schema matches
-				const valres = validator.validate(bodyparam, param)
-
+				const valres = validator.validate(bodyparam, param.schema)
+				
 				if(valres.errors.length != 0)
 				{
-					reject(result(null, 
+					const e = result(null, 
 					{
 						code: errcodes.BAD_REQUEST,
 						msg: 'Schema error: ' + name,
 						data: 
 						{
-							validationError: vales.errors,
+							validationError: valres.errors,
 							parameter: name
 						} 
-					}))
+					})
+
+					reject(e)
 				}
 
-				req.body[param] = bodyparam
+				req.body[name] = param.schema.process ? param.schema.process(bodyparam) : bodyparam
 			}
 
 			resolve()
@@ -146,10 +163,19 @@ module.exports.options = function(name, args)
 	optionPresets[name] = args
 }
 
+module.exports.updateAllCollections = function()
+{
+	for(var i in instances)
+	{
+		instances[i].updatePostman()
+	}
+}
+
 class PostmanRouter
 {
 	constructor(args)
 	{
+		instances.push(this)
 		//use preset options
 		if(args.use && optionPresets[args.use])
 		{
@@ -176,6 +202,8 @@ class PostmanRouter
 		this.protocol = args.protocol || 'http'
 
 		this.enctype = args.enctype || 'application/x-www-form-urlencoded'
+
+		this.method = args.method || 'GET'
 
 		if(args.schemas)
 		{
@@ -218,11 +246,42 @@ class PostmanRouter
 			throw 'invalid route'
 		}
 
-		desc.method = desc.method || 'GET'
+		//if no schema is defined, the param itself is treated as the schema
+		for(var p in desc.params)
+		{
+			const param = desc.params[p]
+
+			//apply inheritance
+			if(param.extends)
+			{
+				if(Array.isArray(typeof(param.extends)))
+				{
+					param.extends = [param.extends]
+				}
+
+				for(var e in param.extends)
+				{
+					for(var ekey in param.extends[e])
+					{
+						if(!(ekey in param))
+						{
+							param[ekey] = param.extends[ekey]
+						}
+					}
+				}
+			}
+
+			if(!desc.params[p].schema)
+			{
+				desc.params[p].schema = desc.params[p]
+			}
+		}
+
+		desc.method = desc.method || this.method
 
 		var namesplit = desc.route.split('/')
 
-		desc.name = desc.name || namesplit[namesplit.length() - 1]
+		desc.name = desc.name || namesplit[namesplit.length - 1]
 
 		this.routes[desc.name] = desc
 
@@ -278,12 +337,12 @@ class PostmanRouter
 
 					if(oldRouteIndex && collection.item[oldRouteIndex].request)
 					{
-						if(this.enctype == 'formdata')
+						if(route.enctype == 'form-data')
 						{
 							oldFormdata = collection.item[oldRouteIndex].request.body.formdata
 						}
 
-						if(this.enctype == 'application/x-www-form-urlencoded')
+						if(route.enctype == 'application/x-www-form-urlencoded')
 						{
 							oldFormdata = collection.item[oldRouteIndex].request.body.urlencoded
 						}
@@ -310,14 +369,14 @@ class PostmanRouter
 							}
 						}
 
-						const exampleVal = typeof(param.example) != 'undefined' ? ( param.type == 'string'? param.example : JSON.stringify(param.example)) : null 
+						const exampleVal = typeof(param.example) != 'undefined' ? ( (param.schema.type) == 'string'? param.example : JSON.stringify(param.example)) : null 
 
 						formdata.push(
 						{
 							key: key,
 							type: 'text',
 							value: exampleVal ? exampleVal : ( oldField ? oldField.value : '' ),
-							description: `(${param.type}, ${param.required ? 'required' : 'optional'}) ${param.description}`
+							description: `(${param.schema.type}, ${param.required ? 'required' : 'optional'}) ${param.description}`
 						})
 
 						/*
@@ -349,7 +408,7 @@ class PostmanRouter
 					}
 				}
 
-				if(this.enctype != 'formdata')
+				if(this.enctype != 'form-data')
 				{
 					newRoute.request.header = 
 					[
@@ -432,7 +491,6 @@ class PostmanRouter
 						if(!err)
 						{
 							resolve(JSON.parse(body))
-
 						}else
 						{
 							reject(err)
