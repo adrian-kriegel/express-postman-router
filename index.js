@@ -8,9 +8,11 @@ const path 		= require('path')
 
 const request 	= require('request')
 
+const cli 		= require('node-simple-cli')
+
 
 //list of instances in order to perform operations on all of them at once
-const instances = []
+const instances = {}
 
 var optionPresets = {}
 
@@ -165,17 +167,46 @@ module.exports.options = function(name, args)
 
 module.exports.updateAllCollections = function()
 {
-	for(var i in instances)
+	for(var name in instances)
 	{
-		instances[i].updatePostman()
+		console.log('Updating ' + name)
+		instances[name].updatePostman()
 	}
 }
+
+cli.register('pr-ud', (name) =>
+{
+	if(name == '*')
+	{
+		updateAllCollections()
+	}else
+	{
+		if(name in instances)
+		{
+			instances[name].updatePostman()
+			return 'Started updating collection.'
+
+		}else
+		{
+			return 'Invalid router specified. Type pr-ls for a list of routers.'
+		}
+	}
+})
+
+cli.register('pr-ls', () =>
+{
+	var res = ""
+
+	for(var name in instances)
+		res += name + "\n"
+
+	return res
+})
 
 class PostmanRouter
 {
 	constructor(args)
 	{
-		instances.push(this)
 		//use preset options
 		if(args.use && optionPresets[args.use])
 		{
@@ -184,6 +215,10 @@ class PostmanRouter
 				args[key] = key in args ? args[key] : optionPresets[args.use][key]
 			}
 		}
+
+		this.name = this.createName(args.name || 'PostmanRouter')
+		
+		instances[this.name] = this
 
 		this.folder = args.folder
 
@@ -219,6 +254,20 @@ class PostmanRouter
 				this.addSchema(schemas[i])
 			}
 		}	
+	}
+
+	createName(name, counter = 0)
+	{
+		const newName = name + ( counter === 0 ? '' : counter)
+
+		if(newName in instances)
+		{
+			return this.createName(name, counter + 1)
+
+		}else
+		{
+			return newName
+		}
 	}
 
 	getRouter() { return this.router }
@@ -447,6 +496,61 @@ class PostmanRouter
 		}
 	}
 
+	readPostmanCollection()
+	{
+		return new Promise((resolve, reject) =>
+		{
+			if(this.postman)
+			{
+				if(this.postman.mode == 'API')
+				{
+					const apiKey = this.postman.apikey
+
+					const collection_uid = this.postman.collection_uid
+
+					const url = 'https://api.getpostman.com/collections/' + collection_uid
+
+					request(
+					{
+						url: url,
+						headers:
+						{
+							'X-Api-Key': apiKey
+						},
+						method: 'GET'
+					}, (err, res, body) =>
+					{
+						if(!err)
+						{
+							const response = JSON.parse(body)
+
+							if(response.collection)
+							{
+								resolve(response)
+
+							}else
+							{
+								reject(response)
+							}
+
+						}else
+						{
+							reject(err)
+						}
+					})
+
+				}else if(this.postman.mode == 'FILE')
+				{
+					reject('File mode is not yet supported!')
+				}
+
+			}else
+			{
+				reject()
+			}
+		})
+	}
+
 	updatePostman()
 	{
 		return new Promise((resolve, reject) =>
@@ -475,6 +579,15 @@ class PostmanRouter
 					//update the collection locally
 					this.updatePostmanCollection(collection)
 
+					const newCollection = JSON.stringify(collection)
+
+					//cheap way of saying that nothing has changed
+					if(newCollection == body)
+					{
+						resolve()
+						return
+					}
+
 					//update the collection via the postman api
 					request(
 					{
@@ -484,7 +597,7 @@ class PostmanRouter
 							'X-Api-Key': apiKey
 						},
 						method: 'PUT',
-						body: JSON.stringify(collection)
+						body: newCollection
 
 					}, (err, res, body) =>
 					{
@@ -506,3 +619,4 @@ class PostmanRouter
 
 }
 module.exports.PostmanRouter = PostmanRouter
+
