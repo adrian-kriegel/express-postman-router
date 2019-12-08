@@ -10,9 +10,26 @@ const request 	= require('request')
 
 const cli 		= require('node-simple-cli')
 
+//set up toJSON for RegeExp
+Object.defineProperty(RegExp.prototype, 'toJSON', 
+{
+	value: RegExp.prototype.toString
+});
+
+//all properties a parameter may have in the end
+const PROPS_PARAM = 
+[
+	'description',
+	'example',
+	'schema',
+	'required',
+]
 
 //list of instances in order to perform operations on all of them at once
 const instances = {}
+
+//list of postman collections and their routers
+const postmanCollections = {}
 
 var optionPresets = {}
 
@@ -40,6 +57,8 @@ function error(err = {})
 	return err
 }
 module.exports.error = error
+
+const ERROR_SUCCESS = error({code: '200'})
 
 /**
 	Returns a API-Result object
@@ -165,18 +184,35 @@ module.exports.options = function(name, args)
 	optionPresets[name] = args
 }
 
-module.exports.updateAllCollections = function()
+function updateAllCollections()
 {
-	for(var name in instances)
+	for(var collection_iud in postmanCollections)
 	{
-		console.log('Updating ' + name)
-		instances[name].updatePostman()
+		const routers = postmanCollections[collection_uid]
+
+		//TODO: wow this is ugly but it works since there has to be one element in there anyway
+		const apiKey = routers[0].postman.apiKey
+
+		getPostmanCollection(apiKey, collection_iud).then((collection) =>
+		{
+			for(var i in routers)
+			{
+				routers[i].updatePostmanCollection(collection)
+			}
+
+			updatePostmanCollection(apiKey, collection_uid, collection)
+
+		}).catch(console.error)
 	}
 }
 
+module.exports.updateAllCollections = updateAllCollections
+
+
+
 cli.register('pr-ud', (name) =>
 {
-	if(name == '*')
+	if(name == '*' || !name)
 	{
 		updateAllCollections()
 	}else
@@ -193,14 +229,21 @@ cli.register('pr-ud', (name) =>
 	}
 })
 
-cli.register('pr-ls', () =>
+cli.register('pr-ls', (args) =>
 {
-	var res = ""
+	if(!args)
+		return Object.keys(instances)
+	
+	if(args in instances)
+		return instances[args]
 
-	for(var name in instances)
-		res += name + "\n"
+	return 'Invalid router specified. Type pr-ls for a list of routers.'
+})
 
-	return res
+cli.register('pr-collections', (args) =>
+{
+	return Object.keys(postmanCollections)
+
 })
 
 class PostmanRouter
@@ -230,7 +273,7 @@ class PostmanRouter
 
 		this.router = args.router || express.Router()
 
-		this.routes = {}
+		this.endpoints = {}
 
 		this.postman = args.postman
 
@@ -239,6 +282,8 @@ class PostmanRouter
 		this.enctype = args.enctype || 'application/x-www-form-urlencoded'
 
 		this.method = args.method || 'GET'
+
+		this.use = args.use || false
 
 		if(args.schemas)
 		{
@@ -253,6 +298,17 @@ class PostmanRouter
 			{
 				this.addSchema(schemas[i])
 			}
+		}
+
+		if(this.postman && this.postman.collection_uid)
+		{
+			if(!(this.postman.collection_uid in postmanCollections))
+			{
+				postmanCollections[this.postman.collection_uid] = []
+			}
+
+			postmanCollections[this.postman.collection_uid].push(this)
+
 		}	
 	}
 
@@ -285,17 +341,11 @@ class PostmanRouter
 	*/
 	add(desc)
 	{
-		if(typeof(desc) == 'string')
-		{
-			desc = { route: desc }
-		}
-
 		if(typeof(desc.route) != 'string')
 		{
 			throw 'invalid route'
 		}
 
-		//if no schema is defined, the param itself is treated as the schema
 		for(var p in desc.params)
 		{
 			const param = desc.params[p]
@@ -303,7 +353,7 @@ class PostmanRouter
 			//apply inheritance
 			if(param.extends)
 			{
-				if(Array.isArray(typeof(param.extends)))
+				if(!Array.isArray(typeof(param.extends)))
 				{
 					param.extends = [param.extends]
 				}
@@ -314,15 +364,28 @@ class PostmanRouter
 					{
 						if(!(ekey in param))
 						{
-							param[ekey] = param.extends[ekey]
+							param[ekey] = param.extends[e][ekey]
 						}
 					}
 				}
+				//remove all inheritance statements
+				delete param.extends
 			}
 
-			if(!desc.params[p].schema)
+			//if no schema is defined, the param itself is treated as the schema
+					
+			if(!param.schema)
 			{
-				desc.params[p].schema = desc.params[p]
+				param.schema = {}
+
+				for(var k in param)
+				{
+					if(!PROPS_PARAM.includes(k))
+					{
+						param.schema[k] = param[k]
+						delete param[k]
+					}
+				}
 			}
 		}
 
@@ -332,7 +395,7 @@ class PostmanRouter
 
 		desc.name = desc.name || namesplit[namesplit.length - 1]
 
-		this.routes[desc.name] = desc
+		this.endpoints[desc.name] = desc
 
 		//before executing the callbacks, make sure the specification is used correctly by the caller
 		this.router.all(desc.route, (req, res, next) =>
@@ -345,13 +408,36 @@ class PostmanRouter
 
 			checkParameters(req, desc, this.validator).then((e) =>
 			{
-				desc.callback(req, res, next)
+				next()
 
 			}).catch((e) =>
 			{
 				res.send(e)
 			})
 		})
+
+		if(!Array.isArray(desc.callback))
+		{
+			desc.callback = [desc.callback]
+		}
+
+		for(var i in desc.callback)
+		{
+			const callback = desc.callback[i]
+			
+			switch(desc.method)
+			{
+				case 'POST':
+					this.router.post(desc.route, callback)
+					break
+				
+				case 'GET':
+					this.router.get(desc.route, callback)
+					break
+			}
+		}
+
+		
 	}
 
 	updatePostmanCollection(c)
@@ -359,9 +445,9 @@ class PostmanRouter
 		var collection = c.collection
 
 		//replace all the requests with names matching the ones in this router
-		for(var i in this.routes)
+		for(var i in this.endpoints)
 		{
-			const route = this.routes[i]
+			const route = this.endpoints[i]
 
 			if(!route.hidden)
 			{
@@ -496,61 +582,6 @@ class PostmanRouter
 		}
 	}
 
-	readPostmanCollection()
-	{
-		return new Promise((resolve, reject) =>
-		{
-			if(this.postman)
-			{
-				if(this.postman.mode == 'API')
-				{
-					const apiKey = this.postman.apikey
-
-					const collection_uid = this.postman.collection_uid
-
-					const url = 'https://api.getpostman.com/collections/' + collection_uid
-
-					request(
-					{
-						url: url,
-						headers:
-						{
-							'X-Api-Key': apiKey
-						},
-						method: 'GET'
-					}, (err, res, body) =>
-					{
-						if(!err)
-						{
-							const response = JSON.parse(body)
-
-							if(response.collection)
-							{
-								resolve(response)
-
-							}else
-							{
-								reject(response)
-							}
-
-						}else
-						{
-							reject(err)
-						}
-					})
-
-				}else if(this.postman.mode == 'FILE')
-				{
-					reject('File mode is not yet supported!')
-				}
-
-			}else
-			{
-				reject()
-			}
-		})
-	}
-
 	updatePostman()
 	{
 		return new Promise((resolve, reject) =>
@@ -620,3 +651,109 @@ class PostmanRouter
 }
 module.exports.PostmanRouter = PostmanRouter
 
+/**
+	Returns all route objects from all routes using any of the confignames
+*/
+function getAllEndpoints(confignames)
+{
+	const endpoints = {}
+
+	for(var i in instances)
+	{
+		const router = instances[i]
+
+		if(!confignames || (router.use in confignames) )
+		{
+			for(var r in router.endpoints)
+			{
+				const endpoint = router.endpoints[r]
+				
+				endpoints[endpoint.route] = 
+				{
+					method: endpoint.method,
+					params: endpoint.params,
+				}
+			}
+		}
+	}
+
+	return endpoints
+}
+module.exports.getAllEndpoints = getAllEndpoints
+
+function getPostmanCollection(apiKey, collection_iud)
+{
+	return new Promise((resolve, reject) =>
+	{
+			const url = 'https://api.getpostman.com/collections/' + collection_uid
+
+			request({
+				url: url,
+				headers:
+				{
+					'X-Api-Key': apiKey
+				},
+				method: 'GET'
+				}, (err, res, body) =>
+				{
+				if(!err)
+				{
+					const response = JSON.parse(body)
+
+					if(response.collection)
+					{
+						resolve(response)
+
+					}else
+					{
+						reject(response)
+					}
+
+				}else
+				{
+					reject(err)
+				}
+			})
+		})
+}
+
+function updatePostmanCollection(apiKey, collection_iud, collection)
+{
+	return new Promise((resolve, reject) =>
+	{
+			const url = 'https://api.getpostman.com/collections/' + collection_uid
+
+			const body = JSON.stringify(collection)
+
+			request(
+			{
+				url: url,
+				headers:
+				{
+					'X-Api-Key': apiKey
+				},
+				method: 'POST',
+				body: body,
+
+				}, (err, res, body) =>
+				{
+				if(!err)
+				{
+					const response = JSON.parse(body)
+
+					if(response.collection)
+					{
+						resolve(response)
+
+					}else
+					{
+						reject(response)
+					}
+
+				}else
+				{
+					reject(err)
+				}
+			})
+		})
+}
