@@ -91,6 +91,7 @@ function errRes(code, msg='', data={})
 		result: null
 	}	
 }
+module.exports.errRes = errRes
 
 function checkParameters(req, desc, validator)
 {
@@ -424,7 +425,7 @@ class PostmanRouter
 		for(var i in desc.callback)
 		{
 			const callback = desc.callback[i]
-			
+
 			switch(desc.method)
 			{
 				case 'POST':
