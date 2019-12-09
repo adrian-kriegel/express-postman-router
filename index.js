@@ -390,6 +390,7 @@ class PostmanRouter
 			}
 		}
 
+
 		desc.method = desc.method || this.method
 
 		var namesplit = desc.route.split('/')
