@@ -16,7 +16,7 @@ Object.defineProperty(RegExp.prototype, 'toJSON',
 	value: RegExp.prototype.toString
 });
 
-//all properties a parameter may have in the end
+//all properties an api parameter may have in the end
 const PROPS_PARAM = 
 [
 	'description',
@@ -98,7 +98,7 @@ function checkRequest(req, desc, validator)
 	return new Promise((resolve, reject) =>
 	{
 		var body = checkParameters(req.body, desc.params, validator)
-
+		
 		if(body) 
 		{
 			reject(body)
@@ -106,7 +106,7 @@ function checkRequest(req, desc, validator)
 		}
 
 		var query = checkParameters(req.query, desc.query, validator)
-
+		
 		if(query) 
 		{
 			reject(query)
@@ -147,7 +147,7 @@ function checkParameters(body, params, validator)
 					} 
 				})
 
-				return
+				continue
 			}
 
 			//parse the JSON if necessary
@@ -176,7 +176,6 @@ function checkParameters(body, params, validator)
 
 			if(valres.errors.length != 0)
 			{
-				console.log("awd")
 				return result(null, 
 				{
 					code: errcodes.BAD_REQUEST,
