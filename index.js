@@ -349,11 +349,6 @@ class PostmanRouter
 		{
 			var schemas = args.schemas
 
-			if(typeof(schemas) == 'object')
-			{
-				schemas = [args.schemas]
-			}
-
 			for(var i in schemas)
 			{
 				this.addSchema(schemas[i])
@@ -725,19 +720,29 @@ class PostmanRouter
 		})
 	}
 
+	getSchemas()
+	{
+		return this.validator.schemas
+	}
+
 }
 module.exports.PostmanRouter = PostmanRouter
 
 /**
 	Returns all route objects from all routes using any of the confignames
 */
-function getAllEndpoints(confignames)
+function getAllDocs(confignames)
 {
+
+	const definitions = {}
+
 	const endpoints = {}
 
 	for(var i in instances)
 	{
 		const router = instances[i]
+
+		Object.assign(definitions, router.getSchemas())
 
 		if(!confignames || (router.use in confignames) )
 		{
@@ -754,9 +759,14 @@ function getAllEndpoints(confignames)
 		}
 	}
 
-	return endpoints
+	return {
+
+		definitions: definitions,
+		endpoints: endpoints,
+
+	}
 }
-module.exports.getAllEndpoints = getAllEndpoints
+module.exports.getAllDocs = getAllDocs
 
 function getPostmanCollection(apikey, collection_uid)
 {
