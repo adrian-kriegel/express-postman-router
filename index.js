@@ -150,29 +150,24 @@ function checkParameters(body, params, validator)
 				continue
 			}
 
+			var invalidJSON = false
+			var bodyparamJSON = bodyparam
+
 			//parse the JSON if necessary
 			if(param.schema.type != 'string')
 			{
 				try
 				{
-					bodyparam = JSON.parse(bodyparam)
+					bodyparamJSON = JSON.parse(bodyparam)
 
 				}catch(e)
 				{
-					return result(null, 
-					{
-						code: errcodes.BAD_REQUEST,
-						msg: 'Invalid JSON: ' + name,
-						data: 
-						{
-							param: name
-						} 
-					})
+					invalidJSON = true
 				}
 			}
-
+			
 			//check if the schema matches
-			const valres = validator.validate(bodyparam, param.schema)
+			const valres = validator.validate(bodyparamJSON, param.schema)
 
 			if(valres.errors.length != 0)
 			{
@@ -188,7 +183,7 @@ function checkParameters(body, params, validator)
 				})
 			}
 
-			body[name] = param.schema.process ? param.schema.process(bodyparam) : bodyparam
+			body[name] = param.schema.process ? param.schema.process(bodyparamJSON) : bodyparamJSON
 		}
 
 	}
