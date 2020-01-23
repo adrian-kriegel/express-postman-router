@@ -8,6 +8,12 @@ const cli 		= require('node-simple-cli')
 
 const postman	= require('./postman')
 
+const response 	= require('./APIResponse')
+
+module.exports.APIError = response.APIError
+module.exports.ERRORS = response.ERRORS
+const ERRORS = response.ERRORS
+
 //set up toJSON for RegeExp
 Object.defineProperty(RegExp.prototype, 'toJSON', 
 {
@@ -28,71 +34,41 @@ const instances = {}
 
 var optionPresets = {}
 
-const errcodes = 
-{
-	UNKNOWN: -2,
-	SUCCESS: 200,
-	FOUND: 404,
-	BAD_REQUEST: 400,
-	UNAUTHORIZED: 401,
-	FORBIDDEN: 403,
-	INTERNAL_ERROR: 500,
-}
-module.exports.errcodes = errcodes
-
 /**
 	Returns an error-object
 */
 function error(err = {})
 {
-	err.code 	= err.code 	|| errcodes.UNKNOWN
-	err.msg 	= err.msg 	|| 'no error description available'
-	err.data 	= err.data 	|| {}
-
-	return err
+	console.error(new Error('Use of error(...) is deprecated.'))
+	return new response.APIError(err.code, err.msg, err.data)
 }
 module.exports.error = error
 
-const ERROR_SUCCESS = error({code: errcodes.SUCCESS, msg: 'success'})
-
 /**
-	Returns a API-Result object
+	Returns a API-Response object
 */	
 function result(res, err)
 {
-	if(err || !res)
-	{
-		return {
-			error: error(err)
-		}
-
-	}else
-	{
-		return {
-			error: ERROR_SUCCESS,
-			result: res
-		}
-	}
+	console.error(new Error('Use of result(...) is deprecated.'))
+	return new response.APIResponse(res, err)
 }
 module.exports.result = result
 
 /**
-	Returns an empty result with just an error message
+	Returns a response with just an error message
 */
 function errRes(code, msg='', data={})
 {
-	return {
-		error: error({code: code, msg: msg, data: data}),
-		result: null
-	}	
+	console.error('Use of errRes(...) is deprecated.')
+	return new reponse.APIResponse(null, new response.APIError(code, msg, data))
 }
 module.exports.errRes = errRes
 
-function checkRequest(req, desc, validator)
+function checkRequest(req, res, desc, validator)
 {
 	return new Promise((resolve, reject) =>
 	{
-		var body = checkParameters(req.body, desc.params, validator)
+		var body = checkParameters(req.body, desc.params, validator, req, res)
 		
 		if(body) 
 		{
@@ -100,7 +76,7 @@ function checkRequest(req, desc, validator)
 			return
 		}
 
-		var query = checkParameters(req.query, desc.query, validator)
+		var query = checkParameters(req.query, desc.query, validator, req, res)
 		
 		if(query) 
 		{
@@ -121,7 +97,7 @@ function checkRequest(req, desc, validator)
 	})
 }
 
-function checkParameters(body, params, validator)
+function checkParameters(body, params, validator, req, res)
 {
 	if(params)
 	{
@@ -132,15 +108,16 @@ function checkParameters(body, params, validator)
 
 			if(!bodyparam)
 			{
-				if(param.required) return result(null, 
+				if(param.required)
 				{
-					code: errcodes.BAD_REQUEST,
-					msg: 'Missing parameter: ' + name,
-					data: 
-					{
-						param: name
-					} 
-				})
+					throw ERRORS.BAD_REQUEST()
+					.msg('missing parameter: ' + name)
+					.data(
+						{
+								param: name
+						}
+					)
+				}
 
 				continue
 			}
@@ -166,19 +143,17 @@ function checkParameters(body, params, validator)
 
 			if(valres.errors.length != 0)
 			{
-				return result(null, 
-				{
-					code: errcodes.BAD_REQUEST,
-					msg: 'Schema error: ' + name,
-					data: 
+				throw ERRORS.BAD_REQUEST()
+				.msg('schema error: ' + name)
+				.data(
 					{
 						validationError: valres.errors,
-						parameter: name
-					} 
-				})
+						param: name
+					}
+				)
 			}
 
-			body[name] = param.schema.process ? param.schema.process(bodyparamJSON) : bodyparamJSON
+			body[name] = param.schema.process ? param.schema.process(bodyparamJSON, req, res) : bodyparamJSON
 		}
 
 	}
@@ -197,7 +172,13 @@ function checkFiles(req, desc)
 			//check if the file is required but missing form the request
 			if(file.required && !(fname in req.files))
 			{
-				return errRes(errcodes.BAD_REQUEST,'Missing file(s): ' + fname, { file: fname })
+				throw ERRORS.BAD_REQUEST()
+				.msg('missing files: ' + fname)
+				.data(
+					{
+						file: fname
+					}
+				)
 			}
 				
 			//if the file is included in the request
@@ -216,7 +197,13 @@ function checkFiles(req, desc)
 				{
 					if(file.mimetypes && !file.mimetypes.includes(reqFiles[i].mimetype) )
 					{
-						return errRes(errcodes.BAD_REQUEST,'Invalid mimetypes: ' + fname, { file: fname })	
+						throw ERRORS.BAD_REQUEST()
+						.msg('invalid mimetypes: ' + fname)
+						.data(
+							{
+								file: fname
+							}
+						)
 					}
 				}
 			}
@@ -413,22 +400,26 @@ class PostmanRouter
 		this.endpoints[desc.name] = desc
 
 		//before executing the callbacks, make sure the specification is used correctly by the caller
-		this.router.all(desc.route, (req, res, next) =>
+		this.router.all(desc.route, async(req, res, next) =>
 		{
 			if(req.method != desc.method)
 			{
 				next()
 				return	
 			} 
-
-			checkRequest(req, desc, this.validator).then((e) =>
+			
+			try
 			{
-				next()
+				await checkRequest(req, res, desc, this.validator)
 
-			}).catch((e) =>
+			}catch(e)
 			{
-				res.send(e)
-			})
+				response.handleError(req, res, e)
+				return
+			}
+
+
+			next()
 		})
 
 		if(!Array.isArray(desc.callback))
@@ -438,21 +429,64 @@ class PostmanRouter
 
 		for(var i in desc.callback)
 		{
+			//wrap the callback in a try catch in order to filter out errors
 			const callback = desc.callback[i]
-			
+
+			const tryCallback = async (req, res, next) =>
+			{
+				try
+				{
+					const result = await callback(req, res, next)
+
+					if(typeof(result) != 'undefined') 
+					{
+						res.send(new response.APIResponse(result))
+					}
+
+				}catch(e)
+				{
+					response.handleError(req, res, e)
+				}
+			}
+
 			switch(desc.method)
 			{
 				case 'POST':
-					this.router.post(desc.route, callback)
+					this.router.post(desc.route, tryCallback)
 					break
 				
 				case 'GET':
-					this.router.get(desc.route, callback)
+					this.router.get(desc.route, tryCallback)
 					break
 			}
 		}
 
 		
+	}
+
+
+	/**
+		Throws exception or sends error to client depending on error type
+	*/
+	handleError(req, res, e)
+	{
+		//TODO: filter out proper error structure
+		if(e instanceof Error)
+		{
+			console.error('Error in ' + req.route.path)
+			console.error(e)
+			
+		}else
+		{
+			if(e.error)
+			{
+				if(!e.error.data)
+					e.error.data = {}
+
+				e.error.data.endpoint = req.originalUrl
+			}
+			res.send(e)
+		}
 	}
 
 	getSchemas()
