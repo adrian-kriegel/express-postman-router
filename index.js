@@ -68,28 +68,15 @@ function checkRequest(req, res, desc, validator)
 {
 	return new Promise((resolve, reject) =>
 	{
-		var body = checkParameters(req.body, desc.params, validator, req, res)
+		try
+		{
+			checkParameters(req.body, desc.params, validator, req, res)
+			checkParameters(req.query, desc.query, validator, req, res)
+			checkFiles(req, desc)
 		
-		if(body) 
+		}catch(e)
 		{
-			reject(body)
-			return
-		}
-
-		var query = checkParameters(req.query, desc.query, validator, req, res)
-		
-		if(query) 
-		{
-			reject(query)
-			return
-		}
-
-		var files = checkFiles(req, desc)
-
-		if(files) 
-		{
-			reject(files)
-			return
+			reject(e)
 		}
 
 		resolve()
@@ -104,6 +91,7 @@ function checkParameters(body, params, validator, req, res)
 		for(var name in params)
 		{
 			const param = params[name]
+
 			var bodyparam = body[name]
 
 			if(!bodyparam)

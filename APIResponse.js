@@ -69,6 +69,7 @@ function handleError(req, res, e)
 		console.error('Internal error in ' + req.route.path)
 		console.error(e)
 
+		//send an internal error to the client
 		error = ERRORS.INTERNAL()
 			
 	}else
@@ -82,7 +83,16 @@ function handleError(req, res, e)
 		}else
 		{
 			console.error('Throwing Objects/APIResponse is deprecated.')
-			error = e.error
+		
+			if(e.error)
+			{
+				error = e.error
+
+			}else
+			{
+				console.error(e)
+				throw new Error(e)
+			}
 		}
 
 	}
