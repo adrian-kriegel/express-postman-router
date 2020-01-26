@@ -60,7 +60,7 @@ module.exports.result = result
 function errRes(code, msg='', data={})
 {
 	console.error('Use of errRes(...) is deprecated.')
-	return new reponse.APIResponse(null, new response.APIError(code, msg, data))
+	return new response.APIResponse(null, new response.APIError(code, msg, data))
 }
 module.exports.errRes = errRes
 
