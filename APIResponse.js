@@ -66,8 +66,11 @@ function handleError(req, res, e)
 	//check if the error is an Exception or an APIError
 	if(e instanceof Error)
 	{
+		//log the circumstances
 		console.error('Internal error in ' + req.route.path)
 		console.error(e)
+		console.error('Request: ')
+		console.error(JSON.stringify(req.body))
 
 		//send an internal error to the client
 		error = ERRORS.INTERNAL()
