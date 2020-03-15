@@ -5,7 +5,7 @@ const path 		= require('path')
 //list of postman collections and their routers
 const postmanCollections = {}
 
-function updateAllCollections()
+async function updateAllCollections()
 {
 	for(var collection_uid in postmanCollections)
 	{
@@ -14,18 +14,31 @@ function updateAllCollections()
 		//TODO: wow this is ugly but it works since there has to be one element in there anyway
 		const apikey = routers[0].postman.apikey
 
-		getPostmanCollection(apikey, collection_uid).then((collection) =>
-		{
-			for(var i in routers)
-			{
-				addToCollection(collection, routers[i])
-			}
-			updatePostmanCollection(apikey, collection_uid, collection).then(console.log).catch(console.error)
+		let collection = null
 
-		}).catch((e) =>
+		try
+		{
+			collection = await getPostmanCollection(apikey, collection_uid)
+
+		}catch(e)
 		{
 			console.error(e)
-		})
+			continue
+		}
+
+		for(var i in routers)
+		{
+			addToCollection(collection, routers[i])
+		}
+		
+		try
+		{
+			console.log(await updatePostmanCollection(apikey, collection_uid, collection))
+
+		}catch(e)
+		{
+			console.error(e)
+		}
 	}
 }
 
@@ -213,7 +226,7 @@ function updatePostmanCollection(apikey, collection_uid, collection)
 	return new Promise((resolve, reject) =>
 	{
 		const url = 'https://api.getpostman.com/collections/' + collection_uid
-			
+		
 		const body = JSON.stringify(collection)
 
 		request(
