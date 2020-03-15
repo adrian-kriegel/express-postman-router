@@ -70,7 +70,7 @@ function handleError(req, res, e)
 		console.error('Internal error in ' + req.route.path)
 		console.error(e)
 		console.error('Request: ')
-		console.error(JSON.stringify(req.body))
+		console.error(JSON.stringify(req))
 
 		//send an internal error to the client
 		error = ERRORS.INTERNAL()

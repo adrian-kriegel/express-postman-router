@@ -510,6 +510,7 @@ function getAllDocs(confignames)
 				{
 					method: endpoint.method,
 					params: endpoint.params,
+					query: endpoint.query,
 				}
 			}
 		}
